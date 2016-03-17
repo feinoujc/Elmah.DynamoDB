@@ -1,0 +1,18 @@
+﻿<?xml version="1.0"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
+  <metadata>
+    <id>Elmah.DynamoDB</id>
+    <version>$version$</version>
+    <authors>feinoujc</authors>
+    <owners>feinoujc</owners>
+    <title>Elmah.DynamoDB</title>
+    <licenseUrl>https://raw.githubusercontent.com/feinoujc/Elmah.DynamoDB/master/LICENSE</licenseUrl>
+    <projectUrl>https://github.com/feinoujc/Elmah.DynamoDB</projectUrl>
+    <description>Log Elmah Errors to Amazon DynamoDB</description>
+    <tags>AWS Elmah DynamoDB Amazon</tags>
+    <dependencies>
+      <dependency id="elmah" version="[1.2.2,)"/>
+      <dependency id="AWSSDK.DynamoDBv2" version="[3.1,)"/>
+    </dependencies>
+  </metadata>  
+</package> 
