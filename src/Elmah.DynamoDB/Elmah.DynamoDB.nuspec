@@ -11,8 +11,8 @@
     <description>Log Elmah Errors to Amazon DynamoDB</description>
     <tags>AWS Elmah DynamoDB Amazon</tags>
     <dependencies>
-      <dependency id="elmah" version="[1.2.2,)"/>
-      <dependency id="AWSSDK.DynamoDBv2" version="[3.1,)"/>
+      <dependency id="elmah" version="[1.2.2,)" />
+      <dependency id="AWSSDK.DynamoDBv2" version="[3.1,)" />
     </dependencies>
   </metadata>  
 </package> 
