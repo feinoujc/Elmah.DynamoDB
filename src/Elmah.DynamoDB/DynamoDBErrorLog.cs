@@ -3,14 +3,17 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
+using Amazon;
 using Amazon.DynamoDBv2;
 using Amazon.DynamoDBv2.DataModel;
 using Amazon.DynamoDBv2.DocumentModel;
 using Amazon.DynamoDBv2.Model;
+using Amazon.Runtime;
 
 namespace Elmah.DynamoDB
 {
-    public class DynamoDBErrorLog : ErrorLog
+    public class DynamoDBErrorLog : ErrorLog, IDisposable
     {
         private static readonly object PadLock = new object();
         private static bool _tableExists;
@@ -28,7 +31,7 @@ namespace Elmah.DynamoDB
         }
 
         public DynamoDBErrorLog(IDictionary configuration)
-            : this(new AmazonDynamoDBClient(), GetApplicationName(configuration))
+            : this(GetClient(configuration), GetApplicationName(configuration))
         {
             if (configuration == null) throw new ArgumentNullException(nameof(configuration));
 
@@ -51,11 +54,6 @@ namespace Elmah.DynamoDB
             {
                 StreamEnabled = bool.Parse(configuration["streamEnabled"].ToString());
             }
-
-            if (configuration.Contains("createTable"))
-            {
-                CreateTable = bool.Parse(configuration["createTable"].ToString());
-            }
         }
 
         public bool StreamEnabled { get; set; } = true;
@@ -67,7 +65,6 @@ namespace Elmah.DynamoDB
         public int ReadCapacityUnits { get; set; } = 8;
 
         public override string Name => "Amazon DynamoDB Error Log";
-        public bool CreateTable { get; set; } = true;
 
         public override ErrorLogEntry GetError(string id)
         {
@@ -78,17 +75,17 @@ namespace Elmah.DynamoDB
             Guid key;
             if (!Guid.TryParse(id, out key))
             {
-                throw new ArgumentException($"'{id}' is not a Guid", nameof(id));
+                throw new ArgumentException($"Invalid id '{id}'", nameof(id));
             }
 
             using (var context = new DynamoDBContext(_client))
             {
-                var entity = context.Load<ErrorEntity>(key,
-                    new DynamoDBOperationConfig {OverrideTableName = TableName});
+                var entity = context.Load<ErrorEntity>(key, new DynamoDBOperationConfig {OverrideTableName = TableName});
                 var error = ErrorXml.DecodeString(entity.AllXml);
                 return new ErrorLogEntry(this, id, error);
             }
         }
+
 
         public override int GetErrors(int pageIndex, int pageSize, IList errorEntryList)
         {
@@ -96,45 +93,117 @@ namespace Elmah.DynamoDB
 
             var max = pageSize*(pageIndex + 1);
 
-            Dictionary<string, AttributeValue> lastKeyEvaluated = null;
-            var list = new List<ErrorLogEntry>(max);
+            Dictionary<string, AttributeValue> lastEvaluatedKey = null;
+            var errors = new List<ErrorLogEntry>(max);
+
+            // have to start at the beginning and go through up to the current page, this means it will perform worse as we go through more pages
+            // usually, we are just looking at the first few pages so ¯\_(ツ)_/¯
+
+            // low level scanning http://docs.aws.amazon.com/amazondynamodb/latest/developerguide/LowLevelDotNetScanning.html#LowLevelDotNetScanningOptions
             do
             {
                 var request = new QueryRequest(TableName)
                 {
-                    KeyConditionExpression = "Application = :application",
+                    KeyConditionExpression = "Application = :v_appl",
                     ExpressionAttributeValues = new Dictionary<string, AttributeValue>
                     {
-                        {":application", new AttributeValue(ApplicationName)}
+                        {":v_appl", new AttributeValue(ApplicationName)}
                     },
                     IndexName = "Application-TimeUtc-index",
                     ScanIndexForward = false,
                     Limit = max,
                     Select = Select.ALL_PROJECTED_ATTRIBUTES
                 };
-                if (lastKeyEvaluated != null)
+                if (lastEvaluatedKey != null)
                 {
-                    request.ExclusiveStartKey = lastKeyEvaluated;
+                    request.ExclusiveStartKey = lastEvaluatedKey;
                 }
 
                 var response = _client.Query(request);
-                foreach (var item in response.Items)
-                {
-                    var errorXml = item["AllXml"].S;
-                    var errorId = item["ErrorId"].S;
-                    var error = ErrorXml.DecodeString(errorXml);
-                    list.Add(new ErrorLogEntry(this, errorId, error));
-                }
-                lastKeyEvaluated = response.LastEvaluatedKey;
-            } while (lastKeyEvaluated != null && lastKeyEvaluated.Count > 0 && list.Count < max);
+                errors.AddRange(from item in response.Items
+                    let errorXml = item["AllXml"].S
+                    let errorId = item["ErrorId"].S
+                    let error = ErrorXml.DecodeString(errorXml)
+                    select new ErrorLogEntry(this, errorId, error));
 
-            var numToSkip = pageIndex*pageSize;
-            list = list.Skip(numToSkip).Take(pageSize).ToList();
-            list.ForEach(err => errorEntryList.Add(err));
+                lastEvaluatedKey = response.LastEvaluatedKey;
+            } while (lastEvaluatedKey != null && lastEvaluatedKey.Count > 0 && errors.Count < max);
+
+            var numberToSkip = pageIndex*pageSize;
+            errors = errors.Skip(numberToSkip).Take(pageSize).ToList();
+            errors.ForEach(err => errorEntryList.Add(err));
 
             // get total count of items in the table. 
-            // This value is stale (updates every six hours) but will do the job here
+            // This value is stale (updates every six hours) but will do the job in most cases
+
+            // the other alternative would be to do another scan of the entire index with a Select.COUNT
+
             var total = _client.DescribeTable(new DescribeTableRequest(TableName)).Table.ItemCount;
+
+            return Convert.ToInt32(Math.Max(errorEntryList.Count, total));
+        }
+
+
+        // async used when downloading all the logs, use TPL, wrap as APM
+        // https://msdn.microsoft.com/en-us/library/dd997423(v=vs.110).aspx#Anchor_2
+
+        public override IAsyncResult BeginGetErrors(int pageIndex, int pageSize, IList errorEntryList,
+            AsyncCallback asyncCallback,
+            object asyncState)
+        {
+            return GetErrorsAsync(pageIndex, pageSize, errorEntryList)
+                .ContinueWith(t => asyncCallback(t));
+        }
+
+        public override int EndGetErrors(IAsyncResult asyncResult)
+        {
+            return ((Task<int>) asyncResult).Result;
+        }
+
+        /// <summary>
+        /// async clone of <see cref="GetErrors"/>
+        /// </summary>
+        private async Task<int> GetErrorsAsync(int pageIndex, int pageSize, IList errorEntryList)
+        {
+            var max = pageSize*(pageIndex + 1);
+
+            Dictionary<string, AttributeValue> lastEvaluatedKey = null;
+            var errors = new List<ErrorLogEntry>(max);
+
+            do
+            {
+                var request = new QueryRequest(TableName)
+                {
+                    KeyConditionExpression = "Application = :v_appl",
+                    ExpressionAttributeValues = new Dictionary<string, AttributeValue>
+                    {
+                        {":v_appl", new AttributeValue(ApplicationName)}
+                    },
+                    IndexName = "Application-TimeUtc-index",
+                    ScanIndexForward = false,
+                    Limit = max,
+                    Select = Select.ALL_PROJECTED_ATTRIBUTES
+                };
+                if (lastEvaluatedKey != null)
+                {
+                    request.ExclusiveStartKey = lastEvaluatedKey;
+                }
+
+                var response = await _client.QueryAsync(request);
+                errors.AddRange(from item in response.Items
+                    let errorXml = item["AllXml"].S
+                    let errorId = item["ErrorId"].S
+                    let error = ErrorXml.DecodeString(errorXml)
+                    select new ErrorLogEntry(this, errorId, error));
+
+                lastEvaluatedKey = response.LastEvaluatedKey;
+            } while (lastEvaluatedKey != null && lastEvaluatedKey.Count > 0 && errors.Count < max);
+
+            var numberToSkip = pageIndex*pageSize;
+            errors = errors.Skip(numberToSkip).Take(pageSize).ToList();
+            errors.ForEach(err => errorEntryList.Add(err));
+
+            var total = (await _client.DescribeTableAsync(new DescribeTableRequest(TableName))).Table.ItemCount;
 
             return Convert.ToInt32(Math.Max(errorEntryList.Count, total));
         }
@@ -143,10 +212,10 @@ namespace Elmah.DynamoDB
         {
             AssertTableExists();
 
-            var errorXml = ErrorXml.EncodeString(error);
+            var allXml = ErrorXml.EncodeString(error);
             var id = Guid.NewGuid();
 
-            var errorToStore = new ErrorEntity
+            var entity = new ErrorEntity
             {
                 ErrorId = id,
                 Application = ApplicationName,
@@ -157,12 +226,12 @@ namespace Elmah.DynamoDB
                 User = error.User,
                 StatusCode = error.StatusCode,
                 TimeUtc = error.Time.ToUniversalTime(),
-                AllXml = errorXml
+                AllXml = allXml
             };
 
             using (var context = new DynamoDBContext(_client))
             {
-                context.Save(errorToStore, new DynamoDBOperationConfig {OverrideTableName = TableName});
+                context.Save(entity, new DynamoDBOperationConfig {OverrideTableName = TableName});
             }
 
             return id.ToString();
@@ -172,11 +241,6 @@ namespace Elmah.DynamoDB
         {
             if (!_tableExists)
             {
-                if (!CreateTable)
-                {
-                    throw new ResourceNotFoundException("Could not find table " + TableName);
-                }
-
                 lock (PadLock)
                 {
                     if (_tableExists)
@@ -233,24 +297,24 @@ namespace Elmah.DynamoDB
 
             var result = _client.CreateTable(request);
 
-            //try to wait for it to be created
+            //try to wait for it to be created (up to 2 minutes)
             if (result.TableDescription.TableStatus != TableStatus.ACTIVE)
             {
-                for (var i = 0; i < 10; i++)
+                for (var i = 0; i < 60; i++)
                 {
                     try
                     {
                         var describe = _client.DescribeTable(new DescribeTableRequest(TableName));
                         if (describe.Table.TableStatus == TableStatus.CREATING)
                         {
-                            Thread.Sleep(TimeSpan.FromSeconds(5));
+                            Thread.Sleep(TimeSpan.FromSeconds(2));
                             continue;
                         }
                         break;
                     }
                     catch (ResourceNotFoundException)
                     {
-                        Thread.Sleep(TimeSpan.FromSeconds(5));
+                        Thread.Sleep(TimeSpan.FromSeconds(2));
                     }
                 }
             }
@@ -271,6 +335,32 @@ namespace Elmah.DynamoDB
                 throw new ArgumentException("missing required 'applicationName' in configuration");
             }
             return configuration["applicationName"].ToString();
+        }
+
+
+        private static AmazonDynamoDBClient GetClient(IDictionary configuration)
+        {
+            if (configuration == null) throw new ArgumentNullException(nameof(configuration));
+            if (configuration.Contains("awsProfileName"))
+            {
+                if (configuration.Contains("awsRegion"))
+                {
+                    return new AmazonDynamoDBClient(
+                        new StoredProfileAWSCredentials(configuration["awsProfileName"].ToString()),
+                        RegionEndpoint.GetBySystemName(configuration["awsRegion"].ToString()));
+                }
+                else
+                {
+                    return new AmazonDynamoDBClient(
+                            new StoredProfileAWSCredentials(configuration["awsProfileName"].ToString()));
+                }
+            }
+            return new AmazonDynamoDBClient();
+        }
+
+        public void Dispose()
+        {
+            _client?.Dispose();
         }
     }
 }
