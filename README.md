@@ -2,6 +2,8 @@
 
 Log Elmah Errors to DynamoDB
 
+[![Build status](https://ci.appveyor.com/api/projects/status/fquksujtt59wkx8t/branch/master?svg=true)](https://ci.appveyor.com/project/feinoujc/elmah-dynamodb/branch/master)
+<a href="http://www.nuget.org/packages/Elmah.DynamoDB/"><img src="https://img.shields.io/nuget/v/Elmah.DynamoDB.svg" title="NuGet Status"></a>
 
 ## Installation
 
