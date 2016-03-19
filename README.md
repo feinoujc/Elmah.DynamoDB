@@ -48,7 +48,7 @@ This will log errors to a table named "Elmah_ErrorLog"
 </elmah>
 ```
 * **tableName** = the name of the DynamoDB table (default: Elmah_ErrorLog)
-* **awsProfileName** = The name of the custom AWS profile to use for credentials. You can use this to give the Elmah driver a different IAM identity than the rest of your application
+* **awsProfileName** = The name of the custom AWS [profile](https://blogs.aws.amazon.com/net/post/Tx1310VG2O81PSY/Referencing-Credentials-using-Profiles) to use for credentials. You can use this to give the Elmah driver a different IAM identity than the rest of your application
 * **awsRegion** = the name of the AWS region to use (Only used if awsProfileName is set)
 * **streamEnabled** = enable DynamoDB [streams](http://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Streams.html) (default: true)
 * **readCapacityUnits** = the read capacity units to use when first creating this table (default: 8)
