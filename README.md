@@ -29,7 +29,7 @@ the IAM Identity will need the following permissions
 ### Minimal Configuration
 in your web.config, set the error log type
 
-```
+```xml
 <elmah>
     <errorLog type="Elmah.DynamoDB.DynamoDBErrorLog, Elmah.DynamoDB" applicationName="MyApplication" />
 </elmah>
@@ -37,7 +37,7 @@ in your web.config, set the error log type
 
 This will log errors to a table named "Elmah_ErrorLog"
 ### Configuration Options
-```
+```xml
 <elmah>
     <errorLog type="Elmah.DynamoDB.DynamoDBErrorLog, Elmah.DynamoDB" applicationName="MyApplication" 
       tableName="MyTable"
