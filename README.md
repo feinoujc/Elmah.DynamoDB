@@ -24,8 +24,9 @@ the IAM Identity will need at least the following permissions
  * dynamodb:GetItem
  * dynamodb:PutItem
  * dynamodb:Query
- * dynamodb:CreateTable
  * dynamodb:UpdateItem
+ * dynamodb:CreateTable (if you want to automatically create the table if not present)
+
 
 ### Minimal Configuration
 in your web.config, set the error log type
