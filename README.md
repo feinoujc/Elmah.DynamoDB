@@ -18,13 +18,14 @@ Install-Package Elmah.DynamoDB
 
 Standard AWS SDK Configuration is required before using the elmah dynamoDB driver. The configuration guide can be found here: http://docs.aws.amazon.com/AWSSdkDocsNET/V3/DeveloperGuide/net-dg-config-creds.html
 
-the IAM Identity will need the following permissions
+the IAM Identity will need at least the following permissions
 
-* GetItem
-* PutItem
-* Query
-* CreateTable
-* UpdateTable
+ * dynamodb:DescribeTable
+ * dynamodb:GetItem
+ * dynamodb:PutItem
+ * dynamodb:Query
+ * dynamodb:CreateTable
+ * dynamodb:UpdateItem
 
 ### Minimal Configuration
 in your web.config, set the error log type
