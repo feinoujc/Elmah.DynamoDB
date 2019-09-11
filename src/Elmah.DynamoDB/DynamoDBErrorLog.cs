@@ -80,7 +80,7 @@ namespace Elmah.DynamoDB
 
             using (var context = new DynamoDBContext(_client))
             {
-                var entity = context.Load<ErrorEntity>(key, new DynamoDBOperationConfig {OverrideTableName = TableName});
+                var entity = context.Load<ErrorEntity>(key, new DynamoDBOperationConfig { OverrideTableName = TableName });
                 var error = ErrorXml.DecodeString(entity.AllXml);
                 return new ErrorLogEntry(this, id, error);
             }
@@ -91,7 +91,7 @@ namespace Elmah.DynamoDB
         {
             AssertTableExists();
 
-            var max = pageSize*(pageIndex + 1);
+            var max = pageSize * (pageIndex + 1);
 
             Dictionary<string, AttributeValue> lastEvaluatedKey = null;
             var errors = new List<ErrorLogEntry>(max);
@@ -121,15 +121,15 @@ namespace Elmah.DynamoDB
 
                 var response = _client.Query(request);
                 errors.AddRange(from item in response.Items
-                    let errorXml = item["AllXml"].S
-                    let errorId = item["ErrorId"].S
-                    let error = ErrorXml.DecodeString(errorXml)
-                    select new ErrorLogEntry(this, errorId, error));
+                                let errorXml = item["AllXml"].S
+                                let errorId = item["ErrorId"].S
+                                let error = ErrorXml.DecodeString(errorXml)
+                                select new ErrorLogEntry(this, errorId, error));
 
                 lastEvaluatedKey = response.LastEvaluatedKey;
             } while (lastEvaluatedKey != null && lastEvaluatedKey.Count > 0 && errors.Count < max);
 
-            var numberToSkip = pageIndex*pageSize;
+            var numberToSkip = pageIndex * pageSize;
             errors = errors.Skip(numberToSkip).Take(pageSize).ToList();
             errors.ForEach(err => errorEntryList.Add(err));
 
@@ -157,7 +157,7 @@ namespace Elmah.DynamoDB
 
         public override int EndGetErrors(IAsyncResult asyncResult)
         {
-            return ((Task<int>) asyncResult).Result;
+            return ((Task<int>)asyncResult).Result;
         }
 
         /// <summary>
@@ -165,7 +165,7 @@ namespace Elmah.DynamoDB
         /// </summary>
         private async Task<int> GetErrorsAsync(int pageIndex, int pageSize, IList errorEntryList)
         {
-            var max = pageSize*(pageIndex + 1);
+            var max = pageSize * (pageIndex + 1);
 
             Dictionary<string, AttributeValue> lastEvaluatedKey = null;
             var errors = new List<ErrorLogEntry>(max);
@@ -191,15 +191,15 @@ namespace Elmah.DynamoDB
 
                 var response = await _client.QueryAsync(request);
                 errors.AddRange(from item in response.Items
-                    let errorXml = item["AllXml"].S
-                    let errorId = item["ErrorId"].S
-                    let error = ErrorXml.DecodeString(errorXml)
-                    select new ErrorLogEntry(this, errorId, error));
+                                let errorXml = item["AllXml"].S
+                                let errorId = item["ErrorId"].S
+                                let error = ErrorXml.DecodeString(errorXml)
+                                select new ErrorLogEntry(this, errorId, error));
 
                 lastEvaluatedKey = response.LastEvaluatedKey;
             } while (lastEvaluatedKey != null && lastEvaluatedKey.Count > 0 && errors.Count < max);
 
-            var numberToSkip = pageIndex*pageSize;
+            var numberToSkip = pageIndex * pageSize;
             errors = errors.Skip(numberToSkip).Take(pageSize).ToList();
             errors.ForEach(err => errorEntryList.Add(err));
 
@@ -231,7 +231,7 @@ namespace Elmah.DynamoDB
 
             using (var context = new DynamoDBContext(_client))
             {
-                context.Save(entity, new DynamoDBOperationConfig {OverrideTableName = TableName});
+                context.Save(entity, new DynamoDBOperationConfig { OverrideTableName = TableName });
             }
 
             return id.ToString();

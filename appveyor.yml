@@ -1,25 +1,25 @@
-os: Visual Studio 2015
-environment:
-  VisualStudioVersion: 14.0
-configuration: Release
-assembly_info:
-  patch: true
-  file: AssemblyInfo.*
-  assembly_version: "{version}"
-  assembly_file_version: "{version}"
-  assembly_informational_version: "{version}"
+
+image: Visual Studio 2017
+pull_requests:
+  do_not_increment_build_number: true
+nuget:
+  disable_publish_on_pr: true
 before_build:
-  - nuget restore
-build:
-  project: Elmah.DynamoDB.sln
-  publish_nuget: true
-  publish_nuget_symbols: true
+  - dotnet --version
+  - where dotnet
+  - dotnet restore
+build: off
+build_script:
+  - dotnet pack src/Elmah.DynamoDB --include-symbols --configuration Release --output artifacts
+test: off
+artifacts:
+  - path: 'src\**\*.nupkg'
 deploy:
   provider: NuGet
   on:
     branch: master
     appveyor_repo_tag: true
   api_key:
-    secure: yYZGBnyhi9s3qBjVh9KhSnneM/qVxkGiSfNkXWekPyMFSFbDYYoXiuZxwMAQm8YV
+    secure: znBJ3DWOhYRo43eFKnVGodpP2p7fw1Lpdqf27D2SJ61FJemoGQHiAGgZBEmwjVLE
   skip_symbols: false
   artifact: /.*\.nupkg/
