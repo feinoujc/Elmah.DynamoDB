@@ -11,8 +11,13 @@
 		<AssemblyName>Elmah.DynamoDB</AssemblyName>
 	</PropertyGroup>
 	<ItemGroup>
-	  <PackageReference Include="AWSSDK.Core" Version="3.1.1.1" />
-	  <PackageReference Include="AWSSDK.DynamoDBv2" Version="3.1.0.1" />
+	  <PackageReference Include="AWSSDK.Core" Version="3.3.103.70" />
+	  <PackageReference Include="AWSSDK.DynamoDBv2" Version="3.3.104" />
+	  <PackageReference Include="AWSSDK.SecurityToken" Version="3.3.104.2" />
+	  <PackageReference Include="ConfigureAwaitChecker.Analyzer" Version="4.0.0">
+	    <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+	    <PrivateAssets>all</PrivateAssets>
+	  </PackageReference>
 	  <PackageReference Include="elmah" Version="1.2.2" />
 	</ItemGroup>
 </Project>

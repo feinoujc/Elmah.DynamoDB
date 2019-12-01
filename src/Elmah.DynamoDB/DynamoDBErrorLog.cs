@@ -4,12 +4,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Amazon;
+
 using Amazon.DynamoDBv2;
 using Amazon.DynamoDBv2.DataModel;
 using Amazon.DynamoDBv2.DocumentModel;
 using Amazon.DynamoDBv2.Model;
-using Amazon.Runtime;
+using Amazon.Runtime.CredentialManagement;
 
 namespace Elmah.DynamoDB
 {
@@ -72,18 +72,49 @@ namespace Elmah.DynamoDB
 
             AssertTableExists();
 
-            Guid key;
-            if (!Guid.TryParse(id, out key))
+            if (!Guid.TryParse(id, out var key))
             {
                 throw new ArgumentException($"Invalid id '{id}'", nameof(id));
             }
 
             using (var context = new DynamoDBContext(_client))
             {
-                var entity = context.Load<ErrorEntity>(key, new DynamoDBOperationConfig {OverrideTableName = TableName});
+                var entity = context.Load<ErrorEntity>(key, new DynamoDBOperationConfig { OverrideTableName = TableName });
                 var error = ErrorXml.DecodeString(entity.AllXml);
                 return new ErrorLogEntry(this, id, error);
             }
+        }
+
+        public override IAsyncResult BeginGetError(string id, AsyncCallback asyncCallback, object asyncState)
+        {
+            return GetErrorAsync()
+                .ContinueWith(t => asyncCallback(t));
+
+            async Task<ErrorLogEntry> GetErrorAsync()
+            {
+                if (id == null) throw new ArgumentNullException(nameof(id));
+
+                AssertTableExists();
+
+                if (!Guid.TryParse(id, out var key))
+                {
+                    throw new ArgumentException($"Invalid id '{id}'", nameof(id));
+                }
+
+                using (var context = new DynamoDBContext(_client))
+                {
+                    var entity = await context
+                        .LoadAsync<ErrorEntity>(key, new DynamoDBOperationConfig { OverrideTableName = TableName })
+                        .ConfigureAwait(false);
+                    var error = ErrorXml.DecodeString(entity.AllXml);
+                    return new ErrorLogEntry(this, id, error);
+                }
+            }
+        }
+
+        public override ErrorLogEntry EndGetError(IAsyncResult asyncResult)
+        {
+            return ((Task<ErrorLogEntry>)asyncResult).Result;
         }
 
 
@@ -91,7 +122,7 @@ namespace Elmah.DynamoDB
         {
             AssertTableExists();
 
-            var max = pageSize*(pageIndex + 1);
+            var max = pageSize * (pageIndex + 1);
 
             Dictionary<string, AttributeValue> lastEvaluatedKey = null;
             var errors = new List<ErrorLogEntry>(max);
@@ -121,15 +152,15 @@ namespace Elmah.DynamoDB
 
                 var response = _client.Query(request);
                 errors.AddRange(from item in response.Items
-                    let errorXml = item["AllXml"].S
-                    let errorId = item["ErrorId"].S
-                    let error = ErrorXml.DecodeString(errorXml)
-                    select new ErrorLogEntry(this, errorId, error));
+                                let errorXml = item["AllXml"].S
+                                let errorId = item["ErrorId"].S
+                                let error = ErrorXml.DecodeString(errorXml)
+                                select new ErrorLogEntry(this, errorId, error));
 
                 lastEvaluatedKey = response.LastEvaluatedKey;
             } while (lastEvaluatedKey != null && lastEvaluatedKey.Count > 0 && errors.Count < max);
 
-            var numberToSkip = pageIndex*pageSize;
+            var numberToSkip = pageIndex * pageSize;
             errors = errors.Skip(numberToSkip).Take(pageSize).ToList();
             errors.ForEach(err => errorEntryList.Add(err));
 
@@ -157,7 +188,7 @@ namespace Elmah.DynamoDB
 
         public override int EndGetErrors(IAsyncResult asyncResult)
         {
-            return ((Task<int>) asyncResult).Result;
+            return ((Task<int>)asyncResult).Result;
         }
 
         /// <summary>
@@ -165,7 +196,7 @@ namespace Elmah.DynamoDB
         /// </summary>
         private async Task<int> GetErrorsAsync(int pageIndex, int pageSize, IList errorEntryList)
         {
-            var max = pageSize*(pageIndex + 1);
+            var max = pageSize * (pageIndex + 1);
 
             Dictionary<string, AttributeValue> lastEvaluatedKey = null;
             var errors = new List<ErrorLogEntry>(max);
@@ -189,21 +220,21 @@ namespace Elmah.DynamoDB
                     request.ExclusiveStartKey = lastEvaluatedKey;
                 }
 
-                var response = await _client.QueryAsync(request);
+                var response = await _client.QueryAsync(request).ConfigureAwait(false);
                 errors.AddRange(from item in response.Items
-                    let errorXml = item["AllXml"].S
-                    let errorId = item["ErrorId"].S
-                    let error = ErrorXml.DecodeString(errorXml)
-                    select new ErrorLogEntry(this, errorId, error));
+                                let errorXml = item["AllXml"].S
+                                let errorId = item["ErrorId"].S
+                                let error = ErrorXml.DecodeString(errorXml)
+                                select new ErrorLogEntry(this, errorId, error));
 
                 lastEvaluatedKey = response.LastEvaluatedKey;
             } while (lastEvaluatedKey != null && lastEvaluatedKey.Count > 0 && errors.Count < max);
 
-            var numberToSkip = pageIndex*pageSize;
+            var numberToSkip = pageIndex * pageSize;
             errors = errors.Skip(numberToSkip).Take(pageSize).ToList();
             errors.ForEach(err => errorEntryList.Add(err));
 
-            var total = (await _client.DescribeTableAsync(new DescribeTableRequest(TableName))).Table.ItemCount;
+            var total = (await _client.DescribeTableAsync(new DescribeTableRequest(TableName)).ConfigureAwait(false)).Table.ItemCount;
 
             return Convert.ToInt32(Math.Max(errorEntryList.Count, total));
         }
@@ -212,12 +243,51 @@ namespace Elmah.DynamoDB
         {
             AssertTableExists();
 
-            var allXml = ErrorXml.EncodeString(error);
-            var id = Guid.NewGuid();
+            ErrorEntity entity = BuildEntity(error);
 
-            var entity = new ErrorEntity
+            using (var context = new DynamoDBContext(_client))
             {
-                ErrorId = id,
+                context.Save(entity, new DynamoDBOperationConfig { OverrideTableName = TableName });
+            }
+
+            return entity.ErrorId.ToString();
+        }
+
+        public override IAsyncResult BeginLog(Error error, AsyncCallback asyncCallback, object asyncState)
+        {
+            return LogErrorAsync()
+                .ContinueWith(t => asyncCallback(t));
+
+            async Task<string> LogErrorAsync()
+            {
+                AssertTableExists();
+
+                ErrorEntity entity = BuildEntity(error);
+
+                using (var context = new DynamoDBContext(_client))
+                {
+                    await context
+                        .SaveAsync(entity, new DynamoDBOperationConfig { OverrideTableName = TableName })
+                        .ConfigureAwait(false);
+                }
+
+                return entity.ErrorId.ToString();
+            }
+        }
+
+        public override string EndLog(IAsyncResult asyncResult)
+        {
+            return ((Task<string>)asyncResult).Result;
+        }
+
+
+        private ErrorEntity BuildEntity(Error error)
+        {
+
+            var allXml = ErrorXml.EncodeString(error);
+            return new ErrorEntity
+            {
+                ErrorId = Guid.NewGuid(),
                 Application = ApplicationName,
                 Host = error.HostName,
                 Type = error.Type,
@@ -228,13 +298,6 @@ namespace Elmah.DynamoDB
                 TimeUtc = error.Time.ToUniversalTime(),
                 AllXml = allXml
             };
-
-            using (var context = new DynamoDBContext(_client))
-            {
-                context.Save(entity, new DynamoDBOperationConfig {OverrideTableName = TableName});
-            }
-
-            return id.ToString();
         }
 
         private void AssertTableExists()
@@ -343,17 +406,19 @@ namespace Elmah.DynamoDB
             if (configuration == null) throw new ArgumentNullException(nameof(configuration));
             if (configuration.Contains("awsProfileName"))
             {
-                if (configuration.Contains("awsRegion"))
+                var profile = configuration["awsProfileName"].ToString();
+                var sharedFile = new SharedCredentialsFile();
+                if (!sharedFile.TryGetProfile(profile, out var basicProfile))
                 {
-                    return new AmazonDynamoDBClient(
-                        new StoredProfileAWSCredentials(configuration["awsProfileName"].ToString()),
-                        RegionEndpoint.GetBySystemName(configuration["awsRegion"].ToString()));
+                    throw new Exception($"Could get profile '{profile}' from shared credential file {sharedFile.FilePath}");
+
                 }
-                else
+
+                if (!AWSCredentialsFactory.TryGetAWSCredentials(basicProfile, sharedFile, out var awsCredentials))
                 {
-                    return new AmazonDynamoDBClient(
-                            new StoredProfileAWSCredentials(configuration["awsProfileName"].ToString()));
+                    throw new Exception($"Could not obtain AWS Credentials from profile '{profile}'");
                 }
+                return new AmazonDynamoDBClient(awsCredentials, basicProfile.Region);
             }
             return new AmazonDynamoDBClient();
         }
